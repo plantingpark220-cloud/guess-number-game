@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>幾 A 幾 B｜版本一</title>
+<style>
+  :root {
+    --bg: #f3f6f4; --card: #ffffff; --ink: #1c2b27; --muted: #5d6f69;
+    --line: #cfdad5; --accent: #1f6f5c; --accent-ink: #ffffff;
+    --bad: #b3261e; --good: #1f6f5c; --warn-bg: #fff4d6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121a18; --card: #1b2623; --ink: #e6efec; --muted: #9db2ab;
+      --line: #32443f; --accent: #5cc4a8; --accent-ink: #0d1815;
+      --bad: #ff8a80; --good: #5cc4a8; --warn-bg: #3a3320;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    line-height: 1.6; padding: 24px 16px;
+  }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 4px; }
+  p.lead { margin: 0 0 20px; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+  .row { display: flex; gap: 8px; }
+  input[type="text"] {
+    flex: 1; font-size: 1.6rem; letter-spacing: .4em; text-align: center;
+    padding: 8px; border: 2px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--ink); min-width: 0;
+  }
+  input[type="text"]:focus-visible, button:focus-visible, .switch input:focus-visible + span {
+    outline: 3px solid var(--accent); outline-offset: 2px;
+  }
+  button {
+    font-size: 1rem; padding: 10px 16px; border-radius: 8px; cursor: pointer;
+    border: 2px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  }
+  button.ghost { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  #msg { min-height: 1.6em; margin: 12px 0 0; font-weight: 600; }
+  #msg.error { color: var(--bad); }
+  #msg.ok { color: var(--good); }
+  #result { margin: 12px 0 0; font-size: 2rem; font-weight: 700; min-height: 1.4em; }
+  .meta { display: flex; justify-content: space-between; align-items: center; margin: 16px 0 0; color: var(--muted); font-size: .95rem; }
+  .debug { margin-top: 16px; padding: 12px; border-radius: 8px; background: var(--warn-bg); display: none; }
+  .debug.on { display: block; }
+  .switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+  .switch input { width: 20px; height: 20px; accent-color: var(--accent); }
+  .actions { margin-top: 16px; display: flex; justify-content: flex-end; }
+  .rules { margin-top: 16px; font-size: .9rem; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>幾 A 幾 B</h1>
+  <p class="lead">猜四個不重複的數字，可以 0 開頭，例如 0123。</p>
+
+  <section class="card" aria-label="遊戲區">
+    <div class="row">
+      <input id="guess" type="text" inputmode="numeric" maxlength="4" autocomplete="off" placeholder="0000" aria-label="輸入四位數字">
+      <button id="submit">送出</button>
+    </div>
+    <p id="msg" role="status" aria-live="polite"></p>
+    <p id="result" aria-live="polite"></p>
+
+    <div class="meta">
+      <span>有效猜測：<strong id="count">0</strong> 次</span>
+      <label class="switch"><input type="checkbox" id="debugToggle"><span>除錯模式</span></label>
+    </div>
+    <div id="debugBox" class="debug">目前答案：<strong id="answer"></strong></div>
+
+    <div class="actions"><button id="restart" class="ghost">重新開始</button></div>
+  </section>
+
+  <p class="rules">A：數字與位置都正確。B：數字正確但位置不同。4A0B 代表答對。</p>
+</main>
+
+<script>
+(function () {
+  var answer = "";
+  var count = 0;
+  var finished = false;
+
+  var guessEl = document.getElementById("guess");
+  var submitEl = document.getElementById("submit");
+  var msgEl = document.getElementById("msg");
+  var resultEl = document.getElementById("result");
+  var countEl = document.getElementById("count");
+  var debugToggle = document.getElementById("debugToggle");
+  var debugBox = document.getElementById("debugBox");
+  var answerEl = document.getElementById("answer");
+  var restartEl = document.getElementById("restart");
+
+  // 產生四個不重複的數字（可由 0 開頭）
+  function newAnswer() {
+    var digits = ["0","1","2","3","4","5","6","7","8","9"];
+    for (var i = digits.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var t = digits[i]; digits[i] = digits[j]; digits[j] = t;
+    }
+    return digits.slice(0, 4).join("");
+  }
+
+  // 計算 A、B；同一個數字不會重複計算
+  function judge(secret, g) {
+    var a = 0, b = 0;
+    for (var i = 0; i < 4; i++) {
+      if (g[i] === secret[i]) a++;
+      else if (secret.indexOf(g[i]) !== -1) b++;
+    }
+    return { a: a, b: b };
+  }
+
+  // 回傳錯誤訊息；空字串代表有效
+  function validate(v) {
+    if (v === "") return "請先輸入四位數字。";
+    if (!/^[0-9]+$/.test(v)) return "只能輸入數字 0～9。";
+    if (v.length !== 4) return "必須剛好四位數字。";
+    if (new Set(v.split("")).size !== 4) return "四個數字不能重複。";
+    return "";
+  }
+
+  function setMsg(text, type) {
+    msgEl.textContent = text;
+    msgEl.className = type || "";
+  }
+
+  function submit() {
+    if (finished) return;
+    var v = guessEl.value.trim();
+    var err = validate(v);
+    if (err) { setMsg(err, "error"); return; }
+
+    var r = judge(answer, v);
+    count++;
+    countEl.textContent = count;
+    resultEl.textContent = v + "　→　" + r.a + "A" + r.b + "B";
+    guessEl.value = "";
+
+    if (r.a === 4) {
+      finished = true;
+      guessEl.disabled = true;
+      submitEl.disabled = true;
+      setMsg("答對了！共猜 " + count + " 次。按「重新開始」再玩一局。", "ok");
+    } else {
+      setMsg("", "");
+      guessEl.focus();
+    }
+  }
+
+  function start() {
+    answer = newAnswer();
+    count = 0;
+    finished = false;
+    countEl.textContent = "0";
+    resultEl.textContent = "";
+    setMsg("", "");
+    guessEl.value = "";
+    guessEl.disabled = false;
+    submitEl.disabled = false;
+    // 新的一局預設關閉除錯顯示
+    debugToggle.checked = false;
+    applyDebug();
+    guessEl.focus();
+  }
+
+  // 只切換顯示，不更動答案、次數或紀錄
+  function applyDebug() {
+    if (debugToggle.checked) {
+      answerEl.textContent = answer;
+      debugBox.classList.add("on");
+    } else {
+      answerEl.textContent = "";
+      debugBox.classList.remove("on");
+    }
+  }
+
+  submitEl.addEventListener("click", submit);
+  guessEl.addEventListener("keydown", function (e) { if (e.key === "Enter") submit(); });
+  debugToggle.addEventListener("change", applyDebug);
+  restartEl.addEventListener("click", start);
+
+  start();
+})();
+</script>
+</body>
+</html>
